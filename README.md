@@ -7,12 +7,15 @@ Fragella code is required.
 
 ## Status
 
-Initial scaffold. A live request to HLTV returned HTTP 403 during development.
-Parsing is tested against **synthetic fixtures**, not verified against current
-live pages. Live collection is not yet validated. The collector stops on
-403/429 and checks robots.txt before requesting listings. It does not solve
-challenges. If access is blocked, obtain permitted access from HLTV or import
-HTML obtained through an authorized channel.
+The standard HTTP client received HTTP 403 during development. With the optional
+`curl_cffi` Chrome transport, a live smoke test on November 8, 2026 (UTC)
+successfully collected and stored 100 results. A fetched live matches page
+also parsed and stored 254 upcoming matches after updating the parser for
+HLTV's current layout (live matches excluded). This is evidence for that run
+and network connection, not a guarantee of continued access. Unit tests use
+**synthetic fixtures**. The collector stops on 429 and checks robots.txt before
+requesting listings. Optional FlareSolverr recovery is tested with mocks, not
+against a live service. Saved HTML can also be imported without network access.
 
 ## Run
 
@@ -59,15 +62,17 @@ observation, not the match time. Limits range from 1 to 500.
 
 - Each invocation requests one listing page; no full-history backfill or match
   detail scraping is implemented.
-- Requests are sequential with at least five seconds between starts. A
+- Requests default to 8–14 seconds between starts (configurable minimum five seconds). A
   robots.txt crawl delay can increase this. Transient network/server failures
-  receive up to three attempts; blocked requests stop immediately.
+  receive up to three attempts. HTTP 429 stops immediately. With an explicitly
+  configured browser service, a 403 triggers one browser attempt; unresolved
+  challenges stop collection.
 - Parsing completes before writes. Unexpected markup and ambiguous empty
   listings fail visibly and preserve stored records.
 - Match IDs deduplicate reruns. Finished records cannot be overwritten by an
   older upcoming listing. Missing matches are retained: cancellation and live
   status tracking are not implemented. Check `collected_at` for stale data.
-- Run collection as a separate scheduled job after live parsing is validated.
+- Run collection as a separate scheduled job after validating access from your deployment network.
   Do not overlap collector runs or launch multiple independent collectors
   against HLTV; throttling is per process. API reads never scrape HLTV.
 
@@ -87,3 +92,51 @@ Tests cover parsing, blocked pages, robots checks, bounded retries, storage
 updates, and API validation. GitHub Actions runs them on Python 3.11 and 3.13.
 
 This project is independent of and unaffiliated with HLTV.
+
+## Browser transport options
+
+Fragella uses browser TLS fingerprints, persistent FlareSolverr sessions, slow
+requests, and residential network exits. This collector implements the portable
+HTTP/browser layers. It does not install or modify Fragella's Pi/WireGuard
+infrastructure. No transport guarantees that HLTV will accept a request.
+
+Install the optional HTTP client in a virtual environment:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install '.[browser]'
+.venv/bin/python -m hltv_api collect --kind results --backend curl
+```
+
+The `curl` backend uses a persistent `curl_cffi` Chrome profile with matching
+default browser headers. Changing only the User-Agent does not reproduce a
+browser's TLS or HTTP/2 behavior. `--user-agent` applies to the standard-library
+backend and the robots policy check; it does not override browser headers.
+
+For JavaScript challenges, run FlareSolverr locally (requires Docker):
+
+```sh
+docker run --rm --name hltv-browser -p 127.0.0.1:8191:8191 \
+  ghcr.io/flaresolverr/flaresolverr:v3.5.2
+.venv/bin/python -m hltv_api collect --kind results --backend curl \
+  --flaresolverr-url http://127.0.0.1:8191 --challenge-timeout 60
+```
+
+FlareSolverr is an external, optional service; it is not started automatically.
+The command above pins the same version referenced by Fragella's documentation;
+this project's tests mock the service rather than launching that image.
+On a 403 or challenge page the collector opens one persistent browser session
+and keeps subsequent fetches in that browser. It validates the returned URL and
+HTML, and destroys the session on exit. Cookies stay in that session and are
+not logged, saved, or copied into a different client. Robots directives still
+apply, including when the browser renders robots.txt inside a `<pre>` element.
+An explicit rate limit stops collection instead of switching sessions or IPs.
+
+Network origin is a separate factor: a datacenter address can remain blocked
+even with browser transport. If you use your own residential exit, run both
+the HTTP client and browser service through that same connection. This project
+does not rotate IPs or configure a VPN. Keep one collector process and schedule
+runs conservatively; API requests should read the cached database.
+
+Upstream references: [curl_cffi](https://github.com/lexiforest/curl_cffi) and
+[FlareSolverr API](https://github.com/FlareSolverr/FlareSolverr#usage).

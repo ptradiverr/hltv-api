@@ -34,6 +34,17 @@ class ParserTests(unittest.TestCase):
         page = '<div class="upcomingMatch"><a href="/matches/123/tbd">TBD</a></div>'
         self.assertIsNone(parse_matches(page, "upcoming")[0]["team1"])
 
+    def test_current_upcoming_layout_excludes_live_and_deduplicates(self):
+        row = '''<div class="match-wrapper" live="false">
+          <a href="/matches/123/test"><div class="match-time" data-unix="1735689600000"></div></a>
+          <div class="match-event" data-event-headline="Event">Event Quarterfinal</div>
+          <div class="match-teamname">Team A</div><div class="match-teamname">Team B</div>
+          </div>'''
+        records = parse_matches(row + row + row.replace('live="false"', 'live="true"').replace('/123/', '/456/'), "upcoming")
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["event"], "Event")
+        self.assertEqual(records[0]["team2"], "Team B")
+
     def test_broken_or_blocked_pages_fail(self):
         for page in ("<html>Just a moment</html>", "<html>empty</html>",
                      fixture("results").replace("result-score", "changed-score"),

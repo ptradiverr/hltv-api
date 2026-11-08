@@ -9,6 +9,9 @@ description = "Independent HLTV match collector and local JSON API"
 requires-python = ">=3.11"
 dependencies = []
 
+[project.optional-dependencies]
+browser = ["curl_cffi>=0.14,<0.18"]
+
 [project.scripts]
 hltv-api = "hltv_api.__main__:main"
 

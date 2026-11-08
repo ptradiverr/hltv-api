@@ -74,6 +74,9 @@ def parse_matches(html: str, kind: str) -> list[dict]:
     root = Tree(html).root
     row_class = "upcomingMatch" if kind == "upcoming" else "result-con"
     rows = [n for n in root.walk() if n.has(row_class)]
+    if kind == "upcoming" and not rows:
+        rows = [n for n in root.walk() if n.has("match-wrapper")
+                and n.attrs.get("live") == "false"]
     # An empty listing is ambiguous: preserve stored data and fail visibly.
     if not rows:
         raise ParseError(f"No {row_class} rows found; page may be empty or markup changed")
@@ -85,11 +88,15 @@ def parse_matches(html: str, kind: str) -> list[dict]:
             raise ParseError("Match row is missing its match link")
         match_id = int(re.match(r"^/matches/(\d+)", link.attrs["href"])[1])
         teams = [n.text() for n in row.walk() if n.has("matchTeamName" if kind == "upcoming" else "team")]
+        if kind == "upcoming" and not teams:
+            teams = [n.text() for n in row.walk() if n.has("match-teamname")]
         if kind == "results" and len(teams) != 2:
             raise ParseError(f"Result {match_id} has an unexpected team layout")
         if len(teams) > 2:
             raise ParseError(f"Match {match_id} has too many teams")
         event = row.find("matchEventName" if kind == "upcoming" else "event-name")
+        if event is None and kind == "upcoming":
+            event = row.find("match-event")
         timestamp = next((n.attrs["data-unix"] for n in row.walk() if n.attrs.get("data-unix")), None)
         try:
             starts_at = datetime.fromtimestamp(int(timestamp) / 1000, timezone.utc).isoformat() if timestamp else None
@@ -104,7 +111,8 @@ def parse_matches(html: str, kind: str) -> list[dict]:
             "status": "scheduled" if kind == "upcoming" else "finished",
             "team1": teams[0] if teams else None,
             "team2": teams[1] if len(teams) > 1 else None,
-            "event": event.text() if event else None, "starts_at": starts_at,
+            "event": (event.attrs.get("data-event-headline") or event.text()) if event else None,
+            "starts_at": starts_at,
             "score1": int(scores[1]) if scores else None,
             "score2": int(scores[2]) if scores else None,
         }
