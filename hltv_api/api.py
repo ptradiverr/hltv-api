@@ -20,20 +20,29 @@ def create_app(store):
         path = environ.get("PATH_INFO", "")
         if path == "/health":
             return reply("200 OK", {"status": "ok"})
-        if path == "/v1/matches":
+        if path in {"/v1/matches", "/v1/players"}:
             query = parse_qs(environ.get("QUERY_STRING", ""), keep_blank_values=True)
             try:
                 limit = int(query.get("limit", ["100"])[0])
                 offset = int(query.get("offset", ["0"])[0])
                 status = query.get("status", [None])[0]
-                if not 1 <= limit <= 500 or offset < 0 or status not in {None, "scheduled", "finished"}:
+                search = query.get("q", [None])[0]
+                if (not 1 <= limit <= 500 or not 0 <= offset <= 9223372036854775807
+                        or (path == "/v1/matches" and status not in {None, "scheduled", "finished"})
+                        or (path == "/v1/players" and (status is not None or (search is not None and len(search) > 128)))):
                     raise ValueError
             except ValueError:
-                return reply("400 Bad Request", {"error": "Invalid limit, offset, or status"})
-            return reply("200 OK", {"data": store.list(status, limit, offset), "limit": limit, "offset": offset})
+                return reply("400 Bad Request", {"error": "Invalid query parameters"})
+            records = store.list_players(search, limit, offset) if path == "/v1/players" else store.list(status, limit, offset)
+            return reply("200 OK", {"data": records, "limit": limit, "offset": offset})
         match = re.fullmatch(r"/v1/matches/(\d{1,18})", path)
         if match:
             record = store.get(int(match[1]))
+            if record:
+                return reply("200 OK", {"data": record})
+        player = re.fullmatch(r"/v1/players/(\d{1,18})", path)
+        if player:
+            record = store.get_player(int(player[1]))
             if record:
                 return reply("200 OK", {"data": record})
         return reply("404 Not Found", {"error": "Not found"})
