@@ -53,4 +53,5 @@ jobs:
       - name: Report immutable API image
         env:
           IMAGE: ghcr.io/ptradiverr/hltv-api@${{ steps.publish.outputs.digest }}
-        run: echo "API image: \`$IMAGE\`" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          echo "API image: \`$IMAGE\`" >> "$GITHUB_STEP_SUMMARY"
