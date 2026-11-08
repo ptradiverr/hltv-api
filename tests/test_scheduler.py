@@ -10,10 +10,11 @@ class SchedulerTests(unittest.TestCase):
         store = MagicMock()
         with patch("hltv_api.scheduler.Collector") as factory:
             client = factory.return_value
-            client.collect.side_effect = [[{"id": 1}], [{"id": 2}]]
+            client.collect.side_effect = [[{"id": 1}], [{"id": 2}], [{"id": 3}]]
             collect_cycle(store)
-            self.assertEqual([c.args[0] for c in client.collect.call_args_list], ["results", "upcoming"])
+            self.assertEqual([c.args[0] for c in client.collect.call_args_list], ["results", "upcoming", "players"])
             self.assertEqual(store.save.call_count, 2)
+            store.save_players.assert_called_once_with([{"id": 3}])
             client.close.assert_called_once()
 
     def test_failed_first_request_skips_second_and_closes_client(self):

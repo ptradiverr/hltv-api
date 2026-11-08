@@ -15,10 +15,13 @@ LOG = logging.getLogger("hltv-scheduler")
 def collect_cycle(store):
     collector = Collector(backend="curl")
     try:
-        for kind in ("results", "upcoming"):
+        for kind in ("results", "upcoming", "players"):
             records = collector.collect(kind)
-            store.save(records)
-            LOG.info("Stored %d %s matches", len(records), kind)
+            if kind == "players":
+                store.save_players(records)
+            else:
+                store.save(records)
+            LOG.info("Stored %d %s records", len(records), kind)
     finally:
         collector.close()
 

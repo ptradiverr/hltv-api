@@ -8,6 +8,7 @@ from urllib.request import Request, urlopen
 from urllib.robotparser import RobotFileParser
 
 from .parser import BASE, parse_matches
+from .players import parse_players, parse_player_stats, player_path
 from .transport import CurlTransport, FlareSolverrTransport, TransportError
 
 
@@ -99,9 +100,7 @@ class Collector:
             time.sleep(2 ** attempt)
         raise CollectionError("Request retries exhausted")
 
-    def collect(self, kind):
-        if kind not in {"upcoming", "results"}:
-            raise ValueError("Unknown collection kind")
+    def fetch_allowed(self, path):
         if self.robots is None:
             self.robots = RobotFileParser()
             robots_text = self.fetch("/robots.txt")
@@ -112,10 +111,21 @@ class Collector:
             if "<html" in robots_text.lower() or "<body" in robots_text.lower():
                 raise CollectionError("robots.txt returned unexpected HTML")
             self.robots.parse(robots_text.splitlines())
-        path = "/matches" if kind == "upcoming" else "/results"
         if not self.robots.can_fetch(self.user_agent, BASE + path):
             raise CollectionError(f"robots.txt disallows {path} for {self.user_agent}")
         crawl_delay = self.robots.crawl_delay(self.user_agent)
         if crawl_delay:
             self.delay = max(self.delay, crawl_delay)
-        return parse_matches(self.fetch(path), kind)
+        return self.fetch(path)
+
+    def collect(self, kind, *, player_url=None):
+        if kind not in {"upcoming", "results", "players"}:
+            raise ValueError("Unknown collection kind")
+        if player_url is not None:
+            if kind != "players":
+                raise ValueError("Player URLs require kind players")
+            path, _ = player_path(player_url)
+            return [parse_player_stats(self.fetch_allowed(path), player_url)]
+        path = {"upcoming": "/matches", "results": "/results", "players": "/stats/players"}[kind]
+        page = self.fetch_allowed(path)
+        return parse_players(page) if kind == "players" else parse_matches(page, kind)

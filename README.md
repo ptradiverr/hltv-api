@@ -1,6 +1,7 @@
 # HLTV API
 
-Run your own collector and JSON API for HLTV results and upcoming matches.
+Run your own collector and JSON API for HLTV results, upcoming matches, and
+player statistics.
 Records are stored in SQLite, so API requests read saved data without making
 another request to HLTV. Each installation uses its own database and internet
 connection. No account or API key is required by this application.
@@ -40,6 +41,7 @@ Run these from the repository directory with the environment activated:
 ```sh
 python -m hltv_api collect --kind results --backend curl
 python -m hltv_api collect --kind upcoming --backend curl
+python -m hltv_api collect --kind players --backend curl
 python -m hltv_api serve
 ```
 
@@ -66,8 +68,9 @@ source .venv/bin/activate
 HLTV_DB="$PWD/hltv.sqlite3" python -m hltv_api.scheduler
 ```
 
-The loop collects results and upcoming matches immediately, then waits **30
-minutes after each cycle** before collecting again. Keep the terminal running;
+The loop collects results, upcoming matches, and the player statistics listing
+immediately, then waits **30 minutes after each cycle** before collecting again.
+Keep the terminal running;
 press Ctrl+C to stop. Use one loop per database and avoid manual collection
 while the loop is active. The API server alone does not collect data.
 
@@ -155,6 +158,9 @@ The default address is `http://127.0.0.1:8000`. Endpoints use `GET` and return J
 | `/v1/matches?status=scheduled` | Upcoming matches |
 | `/v1/matches?limit=50&offset=50` | A page of records starting at offset 50 |
 | `/v1/matches/2380001` | One stored match, or HTTP 404 if absent |
+| `/v1/players` | Stored player statistics, ordered by nickname then ID |
+| `/v1/players?q=zywoo&limit=10` | Players whose nicknames contain the search text |
+| `/v1/players/11893` | One stored player, or HTTP 404 if absent |
 
 The default page size is 100. `limit` accepts 1–500; `offset` starts at zero.
 Filters and pagination can be combined:
@@ -179,6 +185,65 @@ response contains one object in `data`. Match fields are:
 
 Unavailable values are `null`. Scores describe the series result, not
 individual-map round scores. Use `collected_at` to judge freshness.
+
+### Player statistics
+
+Collect the default HLTV statistics listing:
+
+```sh
+python -m hltv_api collect --kind players --backend curl
+```
+
+Each record includes `id`, `name`, the source `url`, `country` when available,
+`teams` shown in the source statistics listing, and a `summary` object:
+
+| Summary field | Meaning |
+| --- | --- |
+| `maps`, `rounds` | Maps and rounds represented by the source listing |
+| `kd_difference` | Kills minus deaths; may be negative |
+| `kd_ratio` | Kill/death ratio |
+| `rating` | Object with the source rating `version` and numeric `value` |
+
+The source listing uses HLTV's default filters and eligibility rules. It is not
+a directory of every player, an official player ranking, or a current roster
+feed. `teams` can include multiple teams represented in the statistics. Date,
+game-version, and event filters are not implemented.
+
+To add detailed statistics for a particular player, copy their unfiltered HLTV
+statistics URL and collect it explicitly:
+
+```sh
+python -m hltv_api collect --kind players --backend curl \
+  --player-url https://www.hltv.org/stats/players/11893/zywoo
+```
+
+The command creates or updates that player's stored record. Its `statistics`
+object contains kills, deaths, headshot percentage, K/D, maps, rounds, damage
+and grenade damage per round, kills/assists/deaths per round, and available
+ratings keyed by version. Unavailable optional metrics are `null`; percentages
+use 0–100 units, for example `45.2`. Listing and profile rating versions can
+differ and are kept separate.
+
+The scheduler refreshes the listing only. Detailed profiles require another
+explicit collection command to refresh them; stop the scheduled collector while
+running manual commands. `summary_collected_at` and `statistics_collected_at`
+track the freshness of each section separately. `collected_at` is the latest
+successful update to either section. Listing refreshes preserve existing
+profile statistics, and profile refreshes preserve the listing summary. A
+profile collected before the listing may have no `summary`, `country`, or `teams`
+until that player appears in a collected listing.
+
+Player endpoints read saved data and never fetch HLTV. They accept the same
+`limit` and `offset` parameters as match endpoints. `q` searches nicknames using
+a literal substring (up to 128 characters); it does not search HLTV itself.
+Existing databases gain a players table automatically on startup, retaining
+their match records. There is no statistics history; each section stores its
+latest collected snapshot.
+
+Player parsing is tested with synthetic fixtures. Live requests to the stats
+pages returned HTTP 403 during development, so live player collection has not
+been verified. Use the offline fixture commands below to test the storage/API
+flow independently of network access.
 
 ## Troubleshooting
 
@@ -248,9 +313,10 @@ are not supported by this deployment model. Persistent storage survives containe
 replacement but provides no backups or replication. Stop both processes before
 copying the database for a simple backup.
 
-Collection covers match listings only. Player statistics, rosters, rankings,
-individual map details, live status, cancellation tracking, and full-history
-backfill are not implemented. Records missing from later listings are retained.
+Collection covers match listings, the player statistics listing, and explicitly
+requested player overview pages. Rosters, official rankings, individual map
+details, live status, cancellation tracking, and full-history backfill are not
+implemented. Records missing from later listings are retained.
 
 ## Development
 
@@ -265,6 +331,9 @@ database:
 
 ```sh
 python -m hltv_api --db sample.sqlite3 collect --kind results --html tests/fixtures/results.html
+python -m hltv_api --db sample.sqlite3 collect --kind players --html tests/fixtures/players.html
+python -m hltv_api --db sample.sqlite3 collect --kind players --html tests/fixtures/player.html \
+  --player-url https://www.hltv.org/stats/players/123/sample
 python -m hltv_api --db sample.sqlite3 serve --port 8001
 ```
 

@@ -7,6 +7,7 @@ from wsgiref.simple_server import make_server
 from .api import create_app
 from .collector import CollectionError, Collector
 from .parser import ParseError, parse_matches
+from .players import parse_players, parse_player_stats, player_path
 from .store import Store
 from .transport import TransportError
 
@@ -16,7 +17,8 @@ def main():
     parser.add_argument("--db", default="hltv.sqlite3")
     commands = parser.add_subparsers(dest="command", required=True)
     collect = commands.add_parser("collect")
-    collect.add_argument("--kind", choices=["upcoming", "results"], required=True)
+    collect.add_argument("--kind", choices=["upcoming", "results", "players"], required=True)
+    collect.add_argument("--player-url", help="With --kind players, collect one unfiltered HLTV player statistics URL")
     collect.add_argument("--html", type=Path, help="Import saved HTML without network access")
     collect.add_argument("--delay", type=float, default=8)
     collect.add_argument("--user-agent", default="hltv-api/0.1")
@@ -30,17 +32,28 @@ def main():
     try:
         store = Store(args.db)
         if args.command == "collect":
+            if args.player_url:
+                if args.kind != "players":
+                    raise ValueError("--player-url requires --kind players")
+                player_path(args.player_url)
             if args.html:
-                records = parse_matches(args.html.read_text(encoding="utf-8"), args.kind)
+                html = args.html.read_text(encoding="utf-8")
+                if args.kind == "players":
+                    records = [parse_player_stats(html, args.player_url)] if args.player_url else parse_players(html)
+                else:
+                    records = parse_matches(html, args.kind)
             else:
                 collector = Collector(args.delay, args.user_agent, backend=args.backend,
                                       flaresolverr_url=args.flaresolverr_url,
                                       challenge_timeout=args.challenge_timeout)
                 try:
-                    records = collector.collect(args.kind)
+                    records = collector.collect(args.kind, **({"player_url": args.player_url} if args.player_url else {}))
                 finally:
                     collector.close()
-            store.save(records)
+            if args.kind == "players":
+                store.save_players(records)
+            else:
+                store.save(records)
             print(json.dumps({"saved": len(records), "kind": args.kind}))
         else:
             with make_server(args.host, args.port, create_app(store)) as server:
