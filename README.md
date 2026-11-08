@@ -2,9 +2,7 @@
 
 Independent Python collector and read-only JSON API for HLTV upcoming matches
 and recent results. Uses Python 3.11+ and the standard library at runtime.
-SQLite persists records between collection runs. No Cytizen infrastructure or
-Fragella code is required.
-
+SQLite persists records between collection runs.
 ## Status
 
 The standard HTTP client received HTTP 403 during development. With the optional
