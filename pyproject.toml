@@ -11,6 +11,7 @@ dependencies = []
 
 [project.optional-dependencies]
 browser = ["curl_cffi>=0.13,<0.18"]
+server = ["gunicorn>=23,<24"]
 
 [project.scripts]
 hltv-api = "hltv_api.__main__:main"
