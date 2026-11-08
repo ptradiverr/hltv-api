@@ -1,1 +1,1 @@
-"""Independent HLTV collector and JSON API."""
+"""Read-only JSON API for locally stored match and player data."""

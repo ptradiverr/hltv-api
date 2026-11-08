@@ -1,0 +1,56 @@
+name: Build API image
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: hltv-api-image-build
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m unittest discover -s tests -v
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Build smoke image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          platforms: linux/amd64
+          tags: hltv-api-smoke:local
+      - name: Check API startup and image contents
+        run: |
+          docker run -d --name hltv-api-smoke --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /data:uid=10001,gid=10001 --tmpfs /tmp -p 127.0.0.1:8000:8000 hltv-api-smoke:local
+          trap 'docker logs hltv-api-smoke; docker rm -f hltv-api-smoke' EXIT
+          curl --fail --retry 10 --retry-all-errors --retry-delay 1 --retry-max-time 30 http://127.0.0.1:8000/health
+          curl --fail http://127.0.0.1:8000/v1/matches
+          curl --fail http://127.0.0.1:8000/v1/players
+          docker exec hltv-api-smoke python -c 'from pathlib import Path; expected = {"__init__.py", "__main__.py", "api.py", "store.py", "wsgi.py"}; actual = {p.name for p in Path("/app/hltv_api").glob("*.py")}; assert actual == expected'
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish API image
+        id: publish
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/ptradiverr/hltv-api:${{ github.sha }}
+          labels: org.opencontainers.image.source=https://github.com/ptradiverr/hltv-api
+      - name: Report immutable API image
+        env:
+          IMAGE: ghcr.io/ptradiverr/hltv-api@${{ steps.publish.outputs.digest }}
+        run: echo "API image: \`$IMAGE\`" >> "$GITHUB_STEP_SUMMARY"

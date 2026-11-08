@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hltv-api"
+version = "0.2.0"
+description = "Self-hosted read-only JSON API for stored Counter-Strike data"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+server = ["gunicorn>=23,<24"]
+
+[project.scripts]
+hltv-api = "hltv_api.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["hltv_api*"]
