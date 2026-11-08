@@ -104,6 +104,7 @@ Install the optional HTTP client in a virtual environment:
 
 ```sh
 python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install '.[browser]'
 .venv/bin/python -m hltv_api collect --kind results --backend curl
 ```
@@ -112,6 +113,13 @@ The `curl` backend uses a persistent `curl_cffi` Chrome profile with matching
 default browser headers. Changing only the User-Agent does not reproduce a
 browser's TLS or HTTP/2 behavior. `--user-agent` applies to the standard-library
 backend and the robots policy check; it does not override browser headers.
+
+On macOS, verify `python3 --version` before creating the virtual environment.
+Apple's Python 3.9 does not meet this project's Python 3.11+ requirement.
+Use an installed Python 3.11+ interpreter explicitly (for example,
+`python3.13 -m venv .venv-py313`) and upgrade pip inside that environment.
+The browser extra supports stable `curl_cffi` 0.13.0 as well as newer releases;
+pre-release packages are not required.
 
 For JavaScript challenges, run FlareSolverr locally (requires Docker):
 
