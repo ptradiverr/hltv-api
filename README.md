@@ -1,167 +1,272 @@
 # HLTV API
 
-Independent Python collector and read-only JSON API for HLTV upcoming matches
-and recent results. Uses Python 3.11+ and the standard library at runtime.
-SQLite persists records between collection runs.
-## Status
+Run your own collector and JSON API for HLTV results and upcoming matches.
+Records are stored in SQLite, so API requests read saved data without making
+another request to HLTV. Each installation uses its own database and internet
+connection. No account or API key is required by this application.
 
-The standard HTTP client received HTTP 403 during development. With the optional
-`curl_cffi` Chrome transport, a live smoke test on November 8, 2026 (UTC)
-successfully collected and stored 100 results. A fetched live matches page
-also parsed and stored 254 upcoming matches after updating the parser for
-HLTV's current layout (live matches excluded). This is evidence for that run
-and network connection, not a guarantee of continued access. Unit tests use
-**synthetic fixtures**. The collector stops on 429 and checks robots.txt before
-requesting listings. Optional FlareSolverr recovery is tested with mocks, not
-against a live service. Saved HTML can also be imported without network access.
+Install with Python or run the published Docker image. This project is
+independent of and unaffiliated with HLTV.
 
-## Run
+## Install with Python
 
-From this repository's root (no package installation required):
+You need **Python 3.11 or newer** and Git. Check your version:
 
 ```sh
-python3 -m hltv_api collect --kind upcoming
-python3 -m hltv_api collect --kind results
-python3 -m hltv_api serve
+python3 --version
 ```
 
-The default database is `hltv.sqlite3`. Specify another database before the
-subcommand: `python3 -m hltv_api --db /path/to/hltv.sqlite3 serve`.
-An installed console command is also available with `pip install .` in your
-own virtual environment.
-
-To exercise the complete storage/API flow offline using sample data:
+On macOS, the system Python may be too old. Install a newer version from
+[python.org](https://www.python.org/downloads/) and use it to create the
+environment, for example `python3.13 -m venv .venv`.
 
 ```sh
-python3 -m hltv_api collect --kind upcoming --html tests/fixtures/upcoming.html
-python3 -m hltv_api collect --kind results --html tests/fixtures/results.html
-python3 -m hltv_api serve
-```
-
-Then open <http://127.0.0.1:8000/v1/matches>. Fixture data is fictional; use a
-separate database for actual collection.
-
-## Endpoints
-
-| Request | Response |
-| --- | --- |
-| `GET /health` | Process liveness (does not indicate collection freshness) |
-| `GET /v1/matches` | Stored records ordered by match ID descending |
-| `GET /v1/matches?status=finished&limit=50&offset=0` | Filtered, paginated records |
-| `GET /v1/matches/2380001` | One match or HTTP 404 |
-
-List and detail responses wrap records in `data`. Fields include `id`, `url`,
-`status`, `team1`, `team2`, `event`, `starts_at`, `score1`, `score2`, and
-`collected_at`. Times use UTC; unavailable fields are null. Scores are series
-scores, not individual-map round scores. `collected_at` is the last successful
-observation, not the match time. Limits range from 1 to 500.
-
-## Collection behavior
-
-- Each invocation requests one listing page; no full-history backfill or match
-  detail scraping is implemented.
-- Requests default to 8–14 seconds between starts (configurable minimum five seconds). A
-  robots.txt crawl delay can increase this. Transient network/server failures
-  receive up to three attempts. HTTP 429 stops immediately. With an explicitly
-  configured browser service, a 403 triggers one browser attempt; unresolved
-  challenges stop collection.
-- Parsing completes before writes. Unexpected markup and ambiguous empty
-  listings fail visibly and preserve stored records.
-- Match IDs deduplicate reruns. Finished records cannot be overwritten by an
-  older upcoming listing. Missing matches are retained: cancellation and live
-  status tracking are not implemented. Check `collected_at` for stale data.
-- Run collection as a separate scheduled job after validating access from your deployment network.
-  Do not overlap collector runs or launch multiple independent collectors
-  against HLTV; throttling is per process. API reads never scrape HLTV.
-
-The bundled WSGI server binds to loopback and is intended for local development.
-For hosting, use a production WSGI server with
-`hltv_api.api.create_app(hltv_api.store.Store(database_path))`, and configure
-authentication, TLS, and request limits at the reverse proxy. This repository
-does not deploy infrastructure or expose an authenticated public service.
-
-## Validate
-
-```sh
-python3 -m unittest discover -s tests -v
-```
-
-Tests cover parsing, blocked pages, robots checks, bounded retries, storage
-updates, and API validation. GitHub Actions runs them on Python 3.11 and 3.13.
-
-This project is independent of and unaffiliated with HLTV.
-
-## Home cluster
-
-The Dockerfile runs the API with Gunicorn as a non-root user. The optional
-**Build home cluster image** GitHub Actions workflow runs tests, checks container
-startup, and publishes amd64/ARM64 images to `ghcr.io/ptradiverr/hltv-api`.
-It reports a digest to pin in the separate `ptradiverr/homelab` repository.
-Image publication does not automatically change homelab desired state.
-
-The homelab `hltv_api` Ansible role deploys one API/collector pod with a shared
-SQLite volume and a private ClusterIP Service. The collector starts immediately
-and then waits 30 minutes between cycles; failures preserve existing data.
-The role remains disabled until `hltv_api_image` is set to a published digest.
-See `homelab/docs/hltv-api.md` for release steps and SSH access instructions.
-
-For container development, set `HLTV_DB` to a writable database path. The
-production API entry point is `hltv_api.wsgi:application`; the collector process
-is `python -m hltv_api.scheduler`. `HLTV_INTERVAL_SECONDS` defaults to 1800 and
-must be at least 900. Use one collector and retain the single-replica deployment.
-
-## Browser transport options
-
-Fragella uses browser TLS fingerprints, persistent FlareSolverr sessions, slow
-requests, and residential network exits. This collector implements the portable
-HTTP/browser layers. It does not install or modify Fragella's Pi/WireGuard
-infrastructure. No transport guarantees that HLTV will accept a request.
-
-Install the optional HTTP client in a virtual environment:
-
-```sh
+git clone https://github.com/ptradiverr/hltv-api.git
+cd hltv-api
 python3 -m venv .venv
-.venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install '.[browser]'
-.venv/bin/python -m hltv_api collect --kind results --backend curl
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install '.[browser,server]'
 ```
 
-The `curl` backend uses a persistent `curl_cffi` Chrome profile with matching
-default browser headers. Changing only the User-Agent does not reproduce a
-browser's TLS or HTTP/2 behavior. `--user-agent` applies to the standard-library
-backend and the robots policy check; it does not override browser headers.
+On Windows, use `py -3.13 -m venv .venv` with Python 3.13 installed, then
+`.venv\Scripts\Activate.ps1` in PowerShell. The development server works on
+Windows; Gunicorn is for Linux/macOS, including Linux containers and WSL.
 
-On macOS, verify `python3 --version` before creating the virtual environment.
-Apple's Python 3.9 does not meet this project's Python 3.11+ requirement.
-Use an installed Python 3.11+ interpreter explicitly (for example,
-`python3.13 -m venv .venv-py313`) and upgrade pip inside that environment.
-The browser extra supports stable `curl_cffi` 0.13.0 as well as newer releases;
-pre-release packages are not required.
+### Collect data and start the API
 
-For JavaScript challenges, run FlareSolverr locally (requires Docker):
+Run these from the repository directory with the environment activated:
 
 ```sh
-docker run --rm --name hltv-browser -p 127.0.0.1:8191:8191 \
+python -m hltv_api collect --kind results --backend curl
+python -m hltv_api collect --kind upcoming --backend curl
+python -m hltv_api serve
+```
+
+Open **<http://127.0.0.1:8000/v1/matches>**. Leave the server terminal running.
+The collection commands print the number of records saved. They fetch the
+recent results and upcoming matches listings, rather than all match history.
+
+Data is saved in `hltv.sqlite3` in the current directory. Rerunning collection
+updates matches by ID without creating duplicates. To choose another database,
+put `--db` before the subcommand every time:
+
+```sh
+python -m hltv_api --db ./matches.sqlite3 collect --kind results --backend curl
+python -m hltv_api --db ./matches.sqlite3 serve
+```
+
+### Keep the data updated
+
+In a second terminal, change to the same repository directory and activate the
+environment. Start the collector loop:
+
+```sh
+source .venv/bin/activate
+HLTV_DB="$PWD/hltv.sqlite3" python -m hltv_api.scheduler
+```
+
+The loop collects results and upcoming matches immediately, then waits **30
+minutes after each cycle** before collecting again. Keep the terminal running;
+press Ctrl+C to stop. Use one loop per database and avoid manual collection
+while the loop is active. The API server alone does not collect data.
+
+On PowerShell, first set `$env:HLTV_DB = "$PWD/hltv.sqlite3"`, then run
+`python -m hltv_api.scheduler`.
+
+To collect hourly instead:
+
+```sh
+HLTV_DB="$PWD/hltv.sqlite3" HLTV_INTERVAL_SECONDS=3600 python -m hltv_api.scheduler
+```
+
+The minimum interval is 900 seconds. Requests within a cycle default to 8–14
+seconds apart; robots.txt crawl delays can increase this. A failed cycle keeps
+saved data and waits for the next cycle before trying again.
+
+## Run with Docker
+
+You need Docker running. Published images support Linux amd64 and ARM64,
+including Raspberry Pis running a 64-bit operating system.
+
+Use a published image digest rather than assuming a `latest` tag exists. This
+example uses a published version; find other versions in the
+[container package](https://github.com/ptradiverr/hltv-api/pkgs/container/hltv-api).
+
+```sh
+export HLTV_IMAGE='ghcr.io/ptradiverr/hltv-api@sha256:3e7e5e63d5d1d08b28a457e41e81440854f4312fcd752d180ced2396da64f323'
+docker pull "$HLTV_IMAGE"
+docker volume create hltv-data
+
+docker run -d --name hltv-api --restart unless-stopped \
+  --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp \
+  -p 127.0.0.1:8000:8000 \
+  --mount source=hltv-data,target=/data \
+  "$HLTV_IMAGE"
+
+docker run -d --name hltv-collector --restart unless-stopped \
+  --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp \
+  --mount source=hltv-data,target=/data \
+  -e HLTV_INTERVAL_SECONDS=1800 \
+  "$HLTV_IMAGE" python -m hltv_api.scheduler
+```
+
+Open **<http://127.0.0.1:8000/v1/matches>**. The API and collector share the
+`hltv-data` volume. An empty `data` list is expected until collection succeeds.
+The image contains application code, not a prepopulated database.
+
+Check progress:
+
+```sh
+docker logs --tail 50 hltv-collector
+docker logs --tail 50 hltv-api
+```
+
+Stop and remove the containers while keeping saved data:
+
+```sh
+docker stop hltv-api hltv-collector
+docker rm hltv-api hltv-collector
+```
+
+To update, stop/remove both containers, choose a newer image digest, pull it,
+and repeat the two `docker run` commands using the same volume. Keep only one
+collector running. Deleting the `hltv-data` volume deletes your records.
+
+Alternatively, build from a local checkout:
+
+```sh
+docker build -t hltv-api:local .
+export HLTV_IMAGE=hltv-api:local
+```
+
+Then use the same volume and container commands above, skipping `docker pull`.
+Docker shell examples work in macOS/Linux terminals or WSL.
+
+## Use the API
+
+The default address is `http://127.0.0.1:8000`. Endpoints use `GET` and return JSON.
+
+| Endpoint | Response |
+| --- | --- |
+| `/health` | API process liveness; does not indicate collection freshness |
+| `/v1/matches` | Stored matches, ordered by match ID descending |
+| `/v1/matches?status=finished` | Finished matches |
+| `/v1/matches?status=scheduled` | Upcoming matches |
+| `/v1/matches?limit=50&offset=50` | A page of records starting at offset 50 |
+| `/v1/matches/2380001` | One stored match, or HTTP 404 if absent |
+
+The default page size is 100. `limit` accepts 1–500; `offset` starts at zero.
+Filters and pagination can be combined:
+
+```sh
+curl 'http://127.0.0.1:8000/v1/matches?status=finished&limit=10&offset=0'
+```
+
+List responses contain a `data` array, `limit`, and `offset`. A single-match
+response contains one object in `data`. Match fields are:
+
+| Field | Meaning |
+| --- | --- |
+| `id` | HLTV match ID |
+| `url` | Source match page |
+| `status` | `scheduled` or `finished` |
+| `team1`, `team2` | Team names, when known |
+| `event` | Tournament name, when available |
+| `starts_at` | Match start time in UTC, when available |
+| `score1`, `score2` | Finished series score, such as 2–1 |
+| `collected_at` | Last successful observation of this record, in UTC |
+
+Unavailable values are `null`. Scores describe the series result, not
+individual-map round scores. Use `collected_at` to judge freshness.
+
+## Troubleshooting
+
+**HTTP 403 or challenge page:** install the `browser` extra and use
+`--backend curl` for manual collection, as shown above. The scheduled collector
+already uses it. Access depends on your network and HLTV's current protections;
+success on another machine is not a guarantee for your connection.
+
+**HTTP 429:** collection stops for that attempt. Let the next scheduled cycle
+try again instead of starting more collectors or shortening the interval.
+
+**No rows found:** the listing may be empty or HLTV's page structure may have
+changed. Update your checkout/image and check the project's issues. Parsing
+failures preserve existing records.
+
+**Empty or stale data:** check collector logs, database paths, and `collected_at`.
+The Python server does not collect data by itself. Both Docker containers must
+mount the same named volume.
+
+**Installation fails:** check `python --version` inside the activated environment,
+upgrade pip, and update your checkout. If the environment uses an old Python,
+create a new environment with Python 3.11+.
+
+**Port 8000 is busy:** stop another API instance, use `serve --port 8001` for
+Python, or change Docker's mapping to `-p 127.0.0.1:8001:8000`.
+
+### Optional browser fallback for Python installations
+
+For JavaScript challenges, manual collection can connect to a local
+[FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) service:
+
+```sh
+docker run -d --rm --name hltv-browser -p 127.0.0.1:8191:8191 \
   ghcr.io/flaresolverr/flaresolverr:v3.5.2
-.venv/bin/python -m hltv_api collect --kind results --backend curl \
+
+python -m hltv_api collect --kind results --backend curl \
   --flaresolverr-url http://127.0.0.1:8191 --challenge-timeout 60
 ```
 
-FlareSolverr is an external, optional service; it is not started automatically.
-The command above pins the same version referenced by Fragella's documentation;
-this project's tests mock the service rather than launching that image.
-On a 403 or challenge page the collector opens one persistent browser session
-and keeps subsequent fetches in that browser. It validates the returned URL and
-HTML, and destroys the session on exit. Cookies stay in that session and are
-not logged, saved, or copied into a different client. Robots directives still
-apply, including when the browser renders robots.txt inside a `<pre>` element.
-An explicit rate limit stops collection instead of switching sessions or IPs.
+This option applies to manual commands; the scheduler has no FlareSolverr
+configuration option. Only HTTP localhost service URLs are accepted. The address
+above assumes Python runs on your host, outside Docker. Stop the optional
+service with `docker stop hltv-browser` when finished.
 
-Network origin is a separate factor: a datacenter address can remain blocked
-even with browser transport. If you use your own residential exit, run both
-the HTTP client and browser service through that same connection. This project
-does not rotate IPs or configure a VPN. Keep one collector process and schedule
-runs conservatively; API requests should read the cached database.
+Recovery uses one browser session per collector and stops if the page remains
+blocked. It cannot guarantee access. robots.txt directives still apply, and
+explicit rate limits stop collection. This integration is tested with mocks;
+it has not been verified against HLTV with a live FlareSolverr service.
 
-Upstream references: [curl_cffi](https://github.com/lexiforest/curl_cffi) and
-[FlareSolverr API](https://github.com/FlareSolverr/FlareSolverr#usage).
+## Hosting and storage
+
+The Python `serve` command is for local development; the Docker image uses
+Gunicorn. On a Linux/macOS host installation, run the production server with:
+
+```sh
+HLTV_DB="$PWD/hltv.sqlite3" gunicorn --bind 127.0.0.1:8000 \
+  --workers 1 --threads 4 hltv_api.wsgi:application
+```
+
+Examples bind API access to your own machine. If you expose your instance beyond
+localhost, put HTTPS, appropriate access controls, and request limits in front
+of it. The application has no built-in authentication or rate limiting.
+
+Keep SQLite on a local filesystem with working file locks. API reads and one
+collector may share it. Multiple collectors and network filesystems such as NFS
+are not supported by this deployment model. Persistent storage survives container
+replacement but provides no backups or replication. Stop both processes before
+copying the database for a simple backup.
+
+Collection covers match listings only. Player statistics, rosters, rankings,
+individual map details, live status, cancellation tracking, and full-history
+backfill are not implemented. Records missing from later listings are retained.
+
+## Development
+
+Run offline tests from a checkout:
+
+```sh
+python -m unittest discover -s tests -v
+```
+
+Try collection without contacting HLTV using synthetic fixtures and a separate
+database:
+
+```sh
+python -m hltv_api --db sample.sqlite3 collect --kind results --html tests/fixtures/results.html
+python -m hltv_api --db sample.sqlite3 serve --port 8001
+```
+
+Fixture data is fictional. Live access can change as HLTV changes its pages or
+protections.
