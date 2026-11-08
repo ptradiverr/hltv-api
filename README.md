@@ -91,6 +91,25 @@ updates, and API validation. GitHub Actions runs them on Python 3.11 and 3.13.
 
 This project is independent of and unaffiliated with HLTV.
 
+## Home cluster
+
+The Dockerfile runs the API with Gunicorn as a non-root user. The optional
+**Build home cluster image** GitHub Actions workflow runs tests, checks container
+startup, and publishes amd64/ARM64 images to `ghcr.io/ptradiverr/hltv-api`.
+It reports a digest to pin in the separate `ptradiverr/homelab` repository.
+Image publication does not automatically change homelab desired state.
+
+The homelab `hltv_api` Ansible role deploys one API/collector pod with a shared
+SQLite volume and a private ClusterIP Service. The collector starts immediately
+and then waits 30 minutes between cycles; failures preserve existing data.
+The role remains disabled until `hltv_api_image` is set to a published digest.
+See `homelab/docs/hltv-api.md` for release steps and SSH access instructions.
+
+For container development, set `HLTV_DB` to a writable database path. The
+production API entry point is `hltv_api.wsgi:application`; the collector process
+is `python -m hltv_api.scheduler`. `HLTV_INTERVAL_SECONDS` defaults to 1800 and
+must be at least 900. Use one collector and retain the single-replica deployment.
+
 ## Browser transport options
 
 Fragella uses browser TLS fingerprints, persistent FlareSolverr sessions, slow

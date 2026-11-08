@@ -81,6 +81,7 @@ class Collector:
                     raise CollectionError("HLTV returned a blocked page; collection stopped")
                 return page
             except HTTPError as exc:
+                exc.close()
                 if exc.code == 403 and self.browser:
                     try:
                         return self._render(path)

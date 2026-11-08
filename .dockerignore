@@ -1,0 +1,4 @@
+*
+!pyproject.toml
+!hltv_api/
+!hltv_api/*.py
