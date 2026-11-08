@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hltv-api"
+version = "0.1.0"
+description = "Independent HLTV match collector and local JSON API"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+hltv-api = "hltv_api.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["hltv_api*"]
